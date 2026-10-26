@@ -1,0 +1,166 @@
+
+fileserver.c
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <arpa/inet.h>
+#include <sys/socket.h>
+#include <sys/types.h>
+
+#define PORT 8080
+#define BUFFER_SIZE 1024
+
+int main()
+{
+    int server_fd, client_socket;
+    struct sockaddr_in server_addr, client_addr;
+    socklen_t addr_len;
+
+    char filename[100];
+    char buffer[BUFFER_SIZE];
+
+    // Create TCP socket
+    server_fd = socket(AF_INET, SOCK_STREAM, 0);
+
+    // Configure server address
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_addr.s_addr = INADDR_ANY;
+    server_addr.sin_port = htons(PORT);
+
+    // Bind socket
+    bind(server_fd, (struct sockaddr *)&server_addr,
+         sizeof(server_addr));
+
+    // Listen for clients
+    listen(server_fd, 5);
+
+    printf("File Server Running...\n");
+
+    while (1)
+    {
+        addr_len = sizeof(client_addr);
+
+        // Accept client connection
+        client_socket = accept(server_fd,
+                               (struct sockaddr *)&client_addr,
+                               &addr_len);
+
+        if (fork() == 0)
+        {
+            // Child process
+            close(server_fd);
+
+            // Receive filename
+            int n = recv(client_socket, filename,
+                         sizeof(filename) - 1, 0);
+
+            if (n <= 0)
+            {
+                close(client_socket);
+                exit(1);
+            }
+
+            filename[n] = '\0';
+
+            // Remove newline if present
+            filename[strcspn(filename, "\r\n")] = '\0';
+
+            // Open requested file
+            FILE *fp = fopen(filename, "r");
+
+            snprintf(buffer, sizeof(buffer),
+                     "Server PID: %d\n\n", getpid());
+
+            send(client_socket, buffer, strlen(buffer), 0);
+
+            if (fp == NULL)
+            {
+                strcpy(buffer, "Requested file does not exist.\n");
+                send(client_socket, buffer, strlen(buffer), 0);
+            }
+            else
+            {
+                // Send file contents
+                while (fgets(buffer, sizeof(buffer), fp) != NULL)
+                {
+                    send(client_socket, buffer,
+                         strlen(buffer), 0);
+                }
+
+                fclose(fp);
+            }
+
+            close(client_socket);
+            exit(0);
+        }
+        else
+        {
+            // Parent process
+            close(client_socket);
+        }
+    }
+
+    close(server_fd);
+    return 0;
+}
+
+
+
+
+
+
+fileclient.c
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <arpa/inet.h>
+
+#define PORT 8080
+#define BUFFER_SIZE 1024
+
+int main()
+{
+    int sockfd;
+    struct sockaddr_in server_addr;
+
+    char filename[100];
+    char buffer[BUFFER_SIZE];
+
+    // Create TCP socket
+    sockfd = socket(AF_INET, SOCK_STREAM, 0);
+
+    // Configure server address
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_port = htons(PORT);
+    server_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+
+    // Connect to server
+    connect(sockfd, (struct sockaddr *)&server_addr,
+            sizeof(server_addr));
+
+    // Enter filename
+    printf("Enter filename: ");
+    scanf("%99s", filename);
+
+    // Send filename to server
+    send(sockfd, filename, strlen(filename) + 1, 0);
+
+    printf("\nResponse from Server:\n\n");
+
+    // Receive server response
+    int n;
+
+    while ((n = recv(sockfd, buffer, BUFFER_SIZE - 1, 0)) > 0)
+    {
+        buffer[n] = '\0';
+        printf("%s", buffer);
+    }
+
+    // Close socket
+    close(sockfd);
+
+    return 0;
+}
